@@ -126,7 +126,7 @@ export function musicMiddleware(env, fetcher = fetch) {
       const origin = req.headers.origin
       let sameOrigin = false
       try {
-        sameOrigin = Boolean(origin) && new URL(origin).host === req.headers.host
+        sameOrigin = Boolean(origin) && (new URL(origin).host === req.headers.host || origin === env.KEYRADAR_ORIGIN)
       } catch {
         /* invalid origin */
       }

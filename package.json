@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "start:api": "node server/index.mjs",
     "dev:local": "vite",
     "mobile": "node scripts/mobile.mjs",
     "test": "vitest run tests/music.test.ts tests/songs.test.ts tests/speech.test.ts tests/cadence-result.test.tsx && node --test tests/tunnel.test.mjs tests/catalog.test.mjs",
