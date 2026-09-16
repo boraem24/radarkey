@@ -8,6 +8,7 @@ import './App.css'
 import { UpdateNotice } from './components/UpdateNotice'
 import { SongExplorer } from './components/SongExplorer'
 import { lyricSearchLink } from './songs/resolve'
+import { supportsSpeechRecognition } from './songs/speech'
 function Mic({ stop = false }: { stop?: boolean }) {
   return stop ? (
     <svg viewBox="0 0 24 24" fill="currentColor">
@@ -169,6 +170,18 @@ export default function App() {
             </small>
           )}
         </p>
+        {active && session.speechDiagnostics && !session.heardPhrase && (
+          <p className="muted" data-testid="speech-capture-status">
+            {session.speechDiagnostics.speechError === 'not-allowed' ||
+            session.speechDiagnostics.speechError === 'service-not-allowed'
+              ? 'O navegador bloqueou o reconhecimento de voz. Verifique a permissão de microfone e o serviço de voz do aparelho.'
+              : session.speechDiagnostics.speechStarts === 0
+                ? 'O reconhecimento de voz ainda não foi iniciado.'
+                : session.speechDiagnostics.speechResults === 0
+                  ? 'Reconhecimento ativo, mas nenhuma palavra chegou ainda.'
+                  : 'O reconhecimento recebeu eventos, mas ainda não formou uma frase.'}
+          </p>
+        )}
         {session.songMatches.slice(0, 3).map((song) =>
           song.sourceUrl ? (
             <div className="music-match" key={song.id}>
@@ -382,7 +395,11 @@ export default function App() {
           >
             Abrir repertório ou corrigir música
           </button>
-          <Diagnostics frame={frame} />
+          <Diagnostics
+            frame={frame}
+            speechDiagnostics={session.speechDiagnostics}
+            speechSupported={supportsSpeechRecognition()}
+          />
           <h3>Perfil de notas · últimos 15 s</h3>
           <div className="chroma">
             {NOTES.map((n, i) => (
