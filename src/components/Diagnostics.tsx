@@ -29,6 +29,10 @@ export function Diagnostics({
   }, [])
   const lastEvent = speechDiagnostics?.lastSpeechEvent
   const age = lastEvent ? Math.max(0, Math.round((Date.now() - lastEvent.at) / 1000)) : null
+  const displayMode =
+    typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches
+      ? 'instalado (standalone)'
+      : 'aba do navegador'
   const values: Record<string, string | number> = {
     'Sample rate': frame ? `${frame.sampleRate} Hz` : '—',
     RMS: frame?.rms.toFixed(4) ?? '—',
@@ -61,6 +65,7 @@ export function Diagnostics({
     'Faixa enabled': speechDiagnostics ? String(speechDiagnostics.trackSnapshot.enabled) : '—',
     'Faixa muted': speechDiagnostics ? String(speechDiagnostics.trackSnapshot.muted) : '—',
     'Motivo de parada': speechDiagnostics?.stoppedReason ?? '—',
+    'Modo de exibição': displayMode,
   }
   return (
     <>
