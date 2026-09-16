@@ -299,7 +299,7 @@ export function useSession() {
           : undefined,
         !test
           ? (track) => {
-              if (track && track.readyState === 'live') {
+              if (track) {
                 const trackSnapshot: TrackSnapshot = {
                   readyState: track.readyState,
                   enabled: track.enabled,
@@ -316,6 +316,10 @@ export function useSession() {
                   stoppedReason: null,
                   trackSnapshot,
                 })
+                if (track.readyState !== 'live') {
+                  if (generation.current === id) setSpeechStatus('error')
+                  return
+                }
                 stopSpeech.current = listenForWords(track, onPhrase, (status) => {
                   if (generation.current === id) setSpeechStatus(status)
                 }, (diagnostics) => {
