@@ -11,6 +11,7 @@ import type { SongCandidate } from '../songs/types'
 import { rankCharts } from '../songs/resolve'
 import { listenForWords, supportsSpeechRecognition } from '../songs/speech'
 import { acousticDecision } from '../songs/consensus'
+import { API_BASE } from '../songs/api'
 import { mergeSongCandidates } from '../songs/library'
 
 const EMPTY: KeyResult = {
@@ -88,7 +89,7 @@ export function useSession() {
     activeRequest.current = request
     if (!test) {
       try {
-        const status = await fetch('/api/music/status', {
+        const status = await fetch(`${API_BASE}/api/music/status`, {
           cache: 'no-store',
           signal: request.signal,
         }).then((response) => response.json())
@@ -121,7 +122,7 @@ export function useSession() {
       mode: 'title' | 'lyrics',
     ): Promise<SongCandidate[]> => {
       const response = await fetch(
-        `/api/music/search?q=${encodeURIComponent(query)}&mode=${mode}`,
+        `${API_BASE}/api/music/search?q=${encodeURIComponent(query)}&mode=${mode}`,
         { cache: 'no-store', signal: request.signal },
       )
       const body = await response.json()
@@ -206,7 +207,7 @@ export function useSession() {
       if (generation.current !== id || foundSong) return
       setMusicState('identifying')
       try {
-        const response = await fetch('/api/music/recognize', {
+        const response = await fetch(`${API_BASE}/api/music/recognize`, {
           method: 'POST',
           body: blob,
           headers: { 'Content-Type': blob.type },
