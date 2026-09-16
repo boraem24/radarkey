@@ -7,10 +7,10 @@ export async function openMicrophone() {
   return navigator.mediaDevices.getUserMedia({
     audio: {
       channelCount: { ideal: 1 },
-      echoCancellation: false,
-      noiseSuppression: false,
-      // Phones expose very different levels; request gain for distant voices.
-      autoGainControl: { ideal: true },
+      // Let the phone's voice path lift a distant singer before pitch analysis.
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
     },
     video: false,
   })

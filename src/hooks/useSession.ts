@@ -87,19 +87,26 @@ export function useSession() {
     let lyrics = false
     const request = new AbortController()
     activeRequest.current = request
+    const browserWords = !test && supportsSpeechRecognition()
     if (!test) {
-      try {
-        const status = await fetch(`${API_BASE}/api/music/status`, {
-          cache: 'no-store',
-          signal: request.signal,
-        }).then((response) => response.json())
-        recognition = Boolean(status.recognition)
-        lyrics = Boolean(status.lyrics)
-      } catch {
-        /* tone detection remains local */
-      }
-      if (generation.current !== id) return
-      setMusicState(recognition || supportsSpeechRecognition() ? 'listening' : 'unavailable')
+      // Do not wait for a sleeping Render instance before opening the mic. On
+      // mobile that delay can also make the browser reject speech recognition
+      // because the original tap is no longer considered a user gesture.
+      setMusicState(browserWords ? 'listening' : 'unavailable')
+      void fetch(`${API_BASE}/api/music/status`, {
+        cache: 'no-store',
+        signal: request.signal,
+      })
+        .then((response) => response.json())
+        .then((status) => {
+          if (generation.current !== id) return
+          recognition = Boolean(status.recognition)
+          lyrics = Boolean(status.lyrics)
+          if (!browserWords && !recognition) setMusicState('unavailable')
+        })
+        .catch(() => {
+          /* tone detection and browser speech remain local */
+        })
     } else setMusicState('idle')
     const history = new ChromaHistory(),
       detector = new KeyDetector()
@@ -276,8 +283,9 @@ export function useSession() {
         },
         () => stop('O áudio foi interrompido. Toque em Começar a ouvir para retomar.'),
         test,
-        recognition
+        !test
           ? (blob) => {
+              if (!recognition) return
               const number = ++excerpts
               sampleQueue = sampleQueue.then(() => identifyExcerpt(blob, number))
             }

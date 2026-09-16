@@ -8,7 +8,7 @@ export async function captureSong(
       'Este navegador não suporta gravação. Use Chrome ou Safari atualizado em uma conexão HTTPS.',
     )
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true },
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     video: false,
   })
   const release = () => stream.getTracks().forEach((t) => t.stop())
