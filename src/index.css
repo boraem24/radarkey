@@ -1,0 +1,64 @@
+﻿:root {
+  font-family: Inter, 'Segoe UI', Arial, sans-serif;
+  color: #e9efed;
+  background: #0b1012;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: wait;
+  opacity: 0.4;
+}
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+  outline: 2px solid #a5f3cb;
+  outline-offset: 5px;
+}
+button {
+  border: 0;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+main {
+  max-width: 1120px;
+  margin: auto;
+  padding: 30px 40px 22px;
+}
+p {
+  line-height: 1.6;
+}
+button {
+  transition:
+    background 0.2s,
+    transform 0.2s;
+}
+button:active {
+  transform: scale(0.98);
+}

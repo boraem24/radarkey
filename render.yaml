@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: keyradar
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    headers:
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
