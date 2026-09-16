@@ -107,3 +107,114 @@ it('requires a second agreeing excerpt for tentative acoustic matches', () => {
   expect(acousticDecision([other], [first], 2)).toBeNull()
   expect(acousticDecision([{ ...first, recognitionScore: 0.62 }], [], 1)?.title).toBe(first.title)
 })
+
+it('expõe contadores, método e alternativas dos eventos de voz', () => {
+  const instances: Array<{
+    onstart: (() => void) | null
+    onresult: ((event: any) => void) | null
+    onend: (() => void) | null
+    onerror: ((event?: { error?: string }) => void) | null
+    start: (track?: MediaStreamTrack) => void
+    abort: () => void
+  }> = []
+  class FakeRecognition {
+    onstart = null
+    onresult = null
+    onend = null
+    onerror = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    maxAlternatives = 0
+    constructor() {
+      instances.push(this as (typeof instances)[number])
+    }
+    start() {}
+    abort() {}
+  }
+  vi.useFakeTimers()
+  vi.stubGlobal('window', {
+    webkitSpeechRecognition: FakeRecognition,
+    setTimeout,
+    clearTimeout,
+  })
+  const track = { readyState: 'live' } as MediaStreamTrack
+  let latest: any
+  const phrases: string[][] = []
+  const stop = listenForWords(
+    track,
+    (value) => phrases.push(value),
+    undefined,
+    (value) => {
+      latest = value
+    },
+  )
+  const first = instances[0]
+  first.onstart?.()
+  first.onresult?.({
+    resultIndex: 0,
+    results: [
+      {
+        isFinal: true,
+        length: 2,
+        0: { transcript: 'Graça sobre graça' },
+        1: { transcript: 'Graça e paz' },
+      },
+    ],
+  })
+  expect(latest.speechStarts).toBe(1)
+  expect(latest.speechResults).toBe(1)
+  expect(latest.startMethod).toBe('track')
+  expect(phrases).toEqual([['Graça sobre graça', 'Graça e paz']])
+  first.onerror?.({ error: 'no-speech' })
+  expect(latest.speechError).toBe('no-speech')
+  expect(latest.stoppedReason).toBeNull()
+  first.onend?.()
+  expect(latest.speechEnds).toBe(1)
+  vi.advanceTimersByTime(350)
+  expect(instances).toHaveLength(2)
+  stop()
+  vi.useRealTimers()
+})
+
+it('não reinicia depois de not-allowed e expõe o motivo de parada', () => {
+  const instances: any[] = []
+  class FakeRecognition {
+    onstart = null
+    onresult = null
+    onend = null
+    onerror = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    maxAlternatives = 0
+    constructor() {
+      instances.push(this)
+    }
+    start() {}
+    abort() {}
+  }
+  vi.useFakeTimers()
+  vi.stubGlobal('window', {
+    webkitSpeechRecognition: FakeRecognition,
+    setTimeout,
+    clearTimeout,
+  })
+  let latest: any
+  const first = listenForWords(
+    { readyState: 'live' } as MediaStreamTrack,
+    () => {},
+    undefined,
+    (value) => {
+      latest = value
+    },
+  )
+  instances[0].onerror?.({ error: 'not-allowed' })
+  instances[0].onend?.()
+  vi.advanceTimersByTime(1000)
+  expect(instances).toHaveLength(1)
+  expect(latest.speechError).toBe('not-allowed')
+  expect(latest.stoppedReason).toBe('not-allowed')
+  first()
+  vi.useRealTimers()
+})
