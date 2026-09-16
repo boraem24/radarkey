@@ -1,6 +1,23 @@
 type SpeechAlternative = { transcript: string; confidence?: number }
-type SpeechResult = { isFinal: boolean; length?: number; 0: SpeechAlternative; [index: number]: SpeechAlternative }
+type SpeechResult = {
+  isFinal: boolean
+  length?: number
+  0: SpeechAlternative
+  [index: number]: SpeechAlternative
+}
 type SpeechEvent = { resultIndex: number; results: ArrayLike<SpeechResult> }
+
+export interface SpeechDiagnostics {
+  speechStarts: number
+  speechResults: number
+  speechEnds: number
+  speechError: string | null
+  lastSpeechEvent: { type: string; at: number } | null
+  startMethod: 'track' | 'plain' | null
+  startException: string | null
+  stoppedReason: string | null
+}
+
 type BrowserRecognition = {
   lang: string
   continuous: boolean
@@ -17,85 +34,144 @@ type SpeechWindow = Window & {
   SpeechRecognition?: new () => BrowserRecognition
   webkitSpeechRecognition?: new () => BrowserRecognition
 }
+
 export function supportsSpeechRecognition() {
   const browser = window as SpeechWindow
   return Boolean(browser.SpeechRecognition || browser.webkitSpeechRecognition)
 }
+
 export function listenForWords(
   track: MediaStreamTrack,
   onPhrase: (phrases: string[]) => void,
   onState?: (state: 'starting' | 'listening' | 'heard' | 'error') => void,
+  onDiagnostics?: (diagnostics: SpeechDiagnostics) => void,
 ): () => void {
   const browser = window as SpeechWindow
   const Constructor = browser.SpeechRecognition || browser.webkitSpeechRecognition
   if (!Constructor) return () => {}
-  const recognition = new Constructor()
-  recognition.lang = 'pt-BR'
-  recognition.continuous = true
-  recognition.interimResults = true
-  recognition.maxAlternatives = 3
-  let stopped = false,
-    interimTimer = 0,
-    lastPhrase = ''
+
+  let recognition: BrowserRecognition | null = null
+  let stopped = false
+  let permanentlyStopped = false
+  let restartTimer = 0
+  let interimTimer = 0
+  let lastPhrase = ''
+  let diagnostics: SpeechDiagnostics = {
+    speechStarts: 0,
+    speechResults: 0,
+    speechEnds: 0,
+    speechError: null,
+    lastSpeechEvent: null,
+    startMethod: null,
+    startException: null,
+    stoppedReason: null,
+  }
+
+  const emit = () => onDiagnostics?.({ ...diagnostics })
+  const markEvent = (type: string) => {
+    diagnostics.lastSpeechEvent = { type, at: Date.now() }
+    emit()
+  }
+  const normalize = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 200)
+
   const begin = () => {
-    if (stopped || track.readyState === 'ended') return
+    if (stopped || permanentlyStopped || track.readyState === 'ended') return
+    const current = new Constructor()
+    recognition = current
+    current.lang = 'pt-BR'
+    current.continuous = true
+    current.interimResults = true
+    current.maxAlternatives = 3
+    diagnostics.startMethod = null
+    emit()
     onState?.('starting')
+
+    current.onstart = () => {
+      diagnostics.speechStarts++
+      markEvent('start')
+      onState?.('listening')
+    }
+    current.onresult = (event) => {
+      diagnostics.speechResults++
+      markEvent('result')
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i]
+        if (!result.isFinal) {
+          if (interimTimer) clearTimeout(interimTimer)
+          const phrase = normalize(result[0]?.transcript || '')
+          interimTimer = window.setTimeout(() => {
+            if (phrase && phrase !== lastPhrase) {
+              lastPhrase = phrase
+              onPhrase([phrase])
+              onState?.('heard')
+            }
+          }, 800)
+          continue
+        }
+        if (interimTimer) clearTimeout(interimTimer)
+        const alternatives: string[] = []
+        for (let a = 0; a < Math.min(3, result.length || 1); a++) {
+          const phrase = normalize(result[a]?.transcript || '')
+          if (phrase) alternatives.push(phrase)
+        }
+        if (alternatives[0] && alternatives[0] !== lastPhrase) {
+          lastPhrase = alternatives[0]
+          onPhrase(alternatives)
+          onState?.('heard')
+        }
+      }
+    }
+    current.onend = () => {
+      diagnostics.speechEnds++
+      markEvent('end')
+      if (!stopped && !permanentlyStopped) {
+        window.clearTimeout(restartTimer)
+        restartTimer = window.setTimeout(begin, 350)
+      }
+    }
+    current.onerror = (event) => {
+      const error = event?.error || 'unknown'
+      diagnostics.speechError = error
+      markEvent('error')
+      if (error === 'not-allowed' || error === 'service-not-allowed') {
+        permanentlyStopped = true
+        diagnostics.stoppedReason = error
+      }
+      onState?.('error')
+    }
+
     try {
-      // Chromium can bind recognition directly to the live microphone track.
-      recognition.start(track)
-    } catch {
+      current.start(track)
+      diagnostics.startMethod = 'track'
+      emit()
+    } catch (exception) {
+      diagnostics.startException = String(exception)
+      emit()
       try {
-        // Older browsers do not accept the optional track argument.
-        recognition.start()
+        current.start()
+        diagnostics.startMethod = 'plain'
+        emit()
       } catch {
         onState?.('error')
       }
     }
   }
-  recognition.onstart = () => onState?.('listening')
-  recognition.onresult = (event) => {
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i]
-      if (!result.isFinal) {
-        if (interimTimer) clearTimeout(interimTimer)
-        const phrase = result[0]?.transcript?.replace(/\s+/g, ' ').trim().slice(0, 200) || ''
-        interimTimer = window.setTimeout(() => {
-          if (phrase && phrase !== lastPhrase) { lastPhrase = phrase; onPhrase([phrase]) }
-          if (phrase) onState?.('heard')
-        }, 800)
-        continue
-      }
-      if (interimTimer) clearTimeout(interimTimer)
-      const alternatives: string[] = []
-      for (let a = 0; a < Math.min(3, result.length || 1); a++) {
-        const phrase = result[a]?.transcript?.replace(/\s+/g, ' ').trim().slice(0, 200) || ''
-        if (phrase) alternatives.push(phrase)
-      }
-      if (alternatives[0] && alternatives[0] !== lastPhrase) {
-        lastPhrase = alternatives[0]
-        onPhrase(alternatives)
-        onState?.('heard')
-      }
-    }
-  }
-  recognition.onend = () => {
-    if (!stopped) window.setTimeout(begin, 350)
-  }
-  recognition.onerror = () => {
-    onState?.('error')
-  }
+
   begin()
   return () => {
     stopped = true
+    clearTimeout(restartTimer)
     if (interimTimer) clearTimeout(interimTimer)
-    recognition.onstart = null
-    recognition.onresult = null
-    recognition.onend = null
-    recognition.onerror = null
-    try {
-      recognition.abort()
-    } catch {
-      /* Already stopped. */
+    if (recognition) {
+      recognition.onstart = null
+      recognition.onresult = null
+      recognition.onend = null
+      recognition.onerror = null
+      try {
+        recognition.abort()
+      } catch {
+        /* Already stopped. */
+      }
     }
   }
 }
