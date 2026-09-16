@@ -50,7 +50,6 @@ export function listenForWords(
   recognition.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i]
-      if (!result.isFinal) continue
       if (!result.isFinal) {
         if (interimTimer) clearTimeout(interimTimer)
         const phrase = result[0]?.transcript?.replace(/\s+/g, ' ').trim().slice(0, 200) || ''
@@ -65,7 +64,10 @@ export function listenForWords(
         const phrase = result[a]?.transcript?.replace(/\s+/g, ' ').trim().slice(0, 200) || ''
         if (phrase) alternatives.push(phrase)
       }
-      if (alternatives[0] && alternatives[0] !== lastPhrase) { lastPhrase = alternatives[0]; onPhrase(alternatives) }
+      if (alternatives[0] && alternatives[0] !== lastPhrase) {
+        lastPhrase = alternatives[0]
+        onPhrase(alternatives)
+      }
     }
   }
   recognition.onend = () => {

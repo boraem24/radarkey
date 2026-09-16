@@ -14,7 +14,9 @@ export class PitchSmoother {
     this.last = 0
   }
   push(hz: number, confidence: number, time: number): Pitch | null {
-    if (!hz || confidence < 0.85) {
+    // A distant phone voice can have lower YIN confidence; temporal smoothing
+    // still rejects isolated noise, so do not discard every quiet frame.
+    if (!hz || confidence < 0.72) {
       if (time - this.last > 250) this.reset()
       return null
     }

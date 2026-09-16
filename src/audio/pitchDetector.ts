@@ -11,7 +11,9 @@ export function detectPitch(data: Float32Array, sampleRate: number) {
     peak = Math.max(peak, Math.abs(x))
   }
   const rms = Math.sqrt(energy / data.length)
-  if (rms < 0.0015 || peak >= 0.995) return { frequency: 0, confidence: 0, rms, peak }
+  // Phone microphones often deliver a quiet but perfectly usable voice signal.
+  // Keep a low noise gate here and let YIN confidence reject random noise.
+  if (rms < 0.00035 || peak >= 0.995) return { frequency: 0, confidence: 0, rms, peak }
   const maxTau = Math.min(Math.floor(sampleRate / 60), Math.floor(data.length / 2) - 1)
   const minTau = Math.max(2, Math.floor(sampleRate / 1100)),
     size = data.length - maxTau

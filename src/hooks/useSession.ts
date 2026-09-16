@@ -263,9 +263,9 @@ export function useSession() {
           setState(
             f.peak >= 0.995
               ? 'clipping'
-              : f.rms < 0.0007
+              : f.rms < 0.00035
                 ? 'noSignal'
-                : f.rms < 0.0015
+                : f.rms < 0.0008
                   ? 'weakSignal'
                   : result.status === 'stable'
                     ? 'stable'
