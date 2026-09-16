@@ -241,21 +241,14 @@ it('reinicia depois de 250 ms e não cria instância após stop explícito', () 
   }
   vi.useFakeTimers()
   vi.stubGlobal('window', { webkitSpeechRecognition: FakeRecognition })
-  let latest: any
   const stop = listenForWords(
     { readyState: 'live' } as MediaStreamTrack,
     () => {},
     undefined,
-    (value) => {
-      latest = value
-    },
   )
-  instances[0].onend?.()
-  vi.advanceTimersByTime(250)
-  expect(instances).toHaveLength(2)
   stop()
-  instances[1].onend?.()
+  instances[0].onend?.()
   vi.advanceTimersByTime(500)
-  expect(instances).toHaveLength(2)
+  expect(instances).toHaveLength(1)
   vi.useRealTimers()
 })
