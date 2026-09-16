@@ -190,6 +190,12 @@ export class AudioEngine {
     if (this.oscillator && this.context)
       this.oscillator.frequency.setValueAtTime(hz, this.context.currentTime)
   }
+  async suspendAnalysis() {
+    if (this.context && this.context.state === 'running') await this.context.suspend()
+  }
+  async resumeAnalysis() {
+    if (this.context && this.context.state === 'suspended') await this.context.resume()
+  }
   stopSamples() {
     this.samplesStopped = true
     window.clearTimeout(this.recorderTimer)

@@ -9,10 +9,18 @@ export function Diagnostics({
   frame,
   speechDiagnostics,
   speechSupported,
+  speechIsolation,
+  onIsolateSpeech,
+  onResumeTone,
+  active,
 }: {
   frame: AudioFrame | null
   speechDiagnostics: SessionSpeechDiagnostics | null
   speechSupported: boolean
+  speechIsolation: boolean
+  onIsolateSpeech: () => void
+  onResumeTone: () => void
+  active: boolean
 }) {
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -73,6 +81,22 @@ export function Diagnostics({
           </div>
         ))}
       </dl>
+      {active && (
+        <div className="test-controls">
+          {speechIsolation ? (
+            <>
+              <p className="muted">Análise de tom pausada — cante ou fale agora para testar reconhecimento isolado.</p>
+              <button type="button" onClick={() => void onResumeTone()}>
+                Retomar análise de tom
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={() => void onIsolateSpeech()}>
+              Testar sem análise de tom
+            </button>
+          )}
+        </div>
+      )}
     </>
   )
 }

@@ -44,15 +44,18 @@ export function useSession() {
     [heardPhrase, setHeardPhrase] = useState(''),
     [speechDiagnostics, setSpeechDiagnostics] = useState<SessionSpeechDiagnostics | null>(null),
     [speechStatus, setSpeechStatus] = useState<'idle' | 'starting' | 'listening' | 'heard' | 'unsupported' | 'error'>('idle'),
+    [speechIsolation, setSpeechIsolation] = useState(false),
     [metrics, setMetrics] = useState({ ttfh: null as number | null, ttfi: null as number | null, ttfc: null as number | null })
   const engine = useRef<AudioEngine | null>(null),
     generation = useRef(0),
     stopSpeech = useRef<(() => void) | null>(null),
+    restartSpeech = useRef<(() => void) | null>(null),
     activeRequest = useRef<AbortController | null>(null)
   const stop = useCallback((reason = '') => {
     generation.current++
     stopSpeech.current?.()
     stopSpeech.current = null
+    restartSpeech.current = null
     activeRequest.current?.abort()
     activeRequest.current = null
     engine.current?.stop()
@@ -60,6 +63,7 @@ export function useSession() {
     setState('idle')
     setMessage(reason)
     setFrame(null)
+    setSpeechIsolation(false)
   }, [])
   useEffect(() => {
     const visibility = () => {
@@ -320,11 +324,15 @@ export function useSession() {
                   if (generation.current === id) setSpeechStatus('error')
                   return
                 }
-                stopSpeech.current = listenForWords(track, onPhrase, (status) => {
-                  if (generation.current === id) setSpeechStatus(status)
-                }, (diagnostics) => {
-                  if (generation.current === id) setSpeechDiagnostics({ ...diagnostics, trackSnapshot })
-                })
+                restartSpeech.current = () => {
+                  stopSpeech.current?.()
+                  stopSpeech.current = listenForWords(track, onPhrase, (status) => {
+                    if (generation.current === id) setSpeechStatus(status)
+                  }, (diagnostics) => {
+                    if (generation.current === id) setSpeechDiagnostics({ ...diagnostics, trackSnapshot })
+                  })
+                }
+                restartSpeech.current()
               } else if (generation.current === id) {
                 setSpeechStatus('error')
               }
@@ -342,6 +350,20 @@ export function useSession() {
       }
     }
   }
+  const isolateSpeech = async () => {
+    if (!engine.current) return
+    stopSpeech.current?.()
+    stopSpeech.current = null
+    await engine.current.suspendAnalysis()
+    setSpeechIsolation(true)
+    restartSpeech.current?.()
+  }
+  const resumeTone = async () => {
+    if (!engine.current) return
+    await engine.current.resumeAnalysis()
+    setSpeechIsolation(false)
+    restartSpeech.current?.()
+  }
   return {
     state,
     message,
@@ -358,6 +380,9 @@ export function useSession() {
     heardPhrase,
     speechDiagnostics,
     speechStatus,
+    speechIsolation,
+    isolateSpeech,
+    resumeTone,
     metrics,
     active: [
       'requestingPermission',

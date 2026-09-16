@@ -399,6 +399,10 @@ export default function App() {
             frame={frame}
             speechDiagnostics={session.speechDiagnostics}
             speechSupported={supportsSpeechRecognition()}
+            speechIsolation={session.speechIsolation}
+            onIsolateSpeech={session.isolateSpeech}
+            onResumeTone={session.resumeTone}
+            active={active}
           />
           <h3>Perfil de notas · últimos 15 s</h3>
           <div className="chroma">
