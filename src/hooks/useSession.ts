@@ -10,6 +10,7 @@ import type { Progression } from '../music/progressionEstimator'
 import type { SongCandidate } from '../songs/types'
 import { rankCharts } from '../songs/resolve'
 import { listenForWords, supportsSpeechRecognition } from '../songs/speech'
+import type { SpeechDiagnostics } from '../songs/speech'
 import { acousticDecision } from '../songs/consensus'
 import { API_BASE } from '../songs/api'
 import { mergeSongCandidates } from '../songs/library'
@@ -20,6 +21,8 @@ const EMPTY: KeyResult = {
   chroma: Array(12).fill(0),
   duration: 0,
 }
+type TrackSnapshot = { readyState: string; enabled: boolean; muted: boolean }
+type SessionSpeechDiagnostics = SpeechDiagnostics & { trackSnapshot: TrackSnapshot }
 export function useSession() {
   const [state, setState] = useState('idle'),
     [message, setMessage] = useState(''),
@@ -39,6 +42,7 @@ export function useSession() {
     >('idle'),
     [songMatches, setSongMatches] = useState<SongCandidate[]>([]),
     [heardPhrase, setHeardPhrase] = useState(''),
+    [speechDiagnostics, setSpeechDiagnostics] = useState<SessionSpeechDiagnostics | null>(null),
     [speechStatus, setSpeechStatus] = useState<'idle' | 'starting' | 'listening' | 'heard' | 'unsupported' | 'error'>('idle'),
     [metrics, setMetrics] = useState({ ttfh: null as number | null, ttfi: null as number | null, ttfc: null as number | null })
   const engine = useRef<AudioEngine | null>(null),
@@ -82,6 +86,7 @@ export function useSession() {
     setSynthetic(test)
     setSongMatches([])
     setHeardPhrase('')
+    setSpeechDiagnostics(null)
     setSpeechStatus(!test && supportsSpeechRecognition() ? 'starting' : test ? 'idle' : 'unsupported')
     setMetrics({ ttfh: null, ttfi: null, ttfc: null })
     const startedAt = performance.now()
@@ -294,10 +299,29 @@ export function useSession() {
           : undefined,
         !test
           ? (track) => {
-              if (track)
+              if (track) {
+                const trackSnapshot: TrackSnapshot = {
+                  readyState: track.readyState,
+                  enabled: track.enabled,
+                  muted: track.muted,
+                }
+                setSpeechDiagnostics({
+                  speechStarts: 0,
+                  speechResults: 0,
+                  speechEnds: 0,
+                  speechError: null,
+                  lastSpeechEvent: null,
+                  startMethod: null,
+                  startException: null,
+                  stoppedReason: null,
+                  trackSnapshot,
+                })
                 stopSpeech.current = listenForWords(track, onPhrase, (status) => {
                   if (generation.current === id) setSpeechStatus(status)
+                }, (diagnostics) => {
+                  if (generation.current === id) setSpeechDiagnostics({ ...diagnostics, trackSnapshot })
                 })
+              }
             }
           : undefined,
       )
@@ -326,6 +350,7 @@ export function useSession() {
     musicState,
     songMatches,
     heardPhrase,
+    speechDiagnostics,
     speechStatus,
     metrics,
     active: [
