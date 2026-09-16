@@ -54,11 +54,8 @@ export function listenForWords(
   let stopped = false
   let permanentlyStopped = false
   let restartTimer = 0
-  let fallbackTimer = 0
   let interimTimer = 0
   let lastPhrase = ''
-  const mobileBrowser =
-    typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   let diagnostics: SpeechDiagnostics = {
     speechStarts: 0,
     speechResults: 0,
@@ -77,18 +74,17 @@ export function listenForWords(
   }
   const normalize = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 200)
 
-  const begin = (forcePlain = false) => {
+  const begin = () => {
     if (stopped || permanentlyStopped || track.readyState === 'ended') return
     const current = new Constructor()
     recognition = current
     current.lang = 'pt-BR'
-    current.continuous = true
+    current.continuous = false
     current.interimResults = true
     current.maxAlternatives = 3
     diagnostics.startMethod = null
     emit()
     onState?.('starting')
-    const resultsAtStart = diagnostics.speechResults
 
     current.onstart = () => {
       diagnostics.speechStarts++
@@ -96,7 +92,6 @@ export function listenForWords(
       onState?.('listening')
     }
     current.onresult = (event) => {
-      clearTimeout(fallbackTimer)
       diagnostics.speechResults++
       markEvent('result')
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -131,7 +126,7 @@ export function listenForWords(
       markEvent('end')
       if (!stopped && !permanentlyStopped) {
         clearTimeout(restartTimer)
-        restartTimer = setTimeout(begin, 350)
+        restartTimer = setTimeout(begin, 250)
       }
     }
     current.onerror = (event) => {
@@ -146,33 +141,9 @@ export function listenForWords(
     }
 
     try {
-      if (forcePlain || mobileBrowser) {
-        current.start()
-        diagnostics.startMethod = 'plain'
-        emit()
-      } else {
-        current.start(track)
-        diagnostics.startMethod = 'track'
-        emit()
-        // Some mobile Chromium builds accept start(track) but silently produce
-        // no results. Fall back to the standard start() before restarting.
-        fallbackTimer = setTimeout(() => {
-          if (
-            recognition === current &&
-            diagnostics.speechResults === resultsAtStart &&
-            !stopped &&
-            !permanentlyStopped
-          ) {
-            current.onend = null
-            try {
-              current.abort()
-            } catch {
-              /* Already stopped. */
-            }
-            begin(true)
-          }
-        }, 1200)
-      }
+      current.start()
+      diagnostics.startMethod = 'plain'
+      emit()
     } catch (exception) {
       diagnostics.startException = String(exception)
       emit()
@@ -190,7 +161,6 @@ export function listenForWords(
   return () => {
     stopped = true
     clearTimeout(restartTimer)
-    clearTimeout(fallbackTimer)
     if (interimTimer) clearTimeout(interimTimer)
     if (recognition) {
       recognition.onstart = null

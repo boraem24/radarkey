@@ -42,7 +42,10 @@ it('uses a live audio track, accepts a five-word final phrase and stops cleanly'
     phrases: string[][] = []
   const stop = listenForWords(track, (phrase) => phrases.push(phrase))
   expect(recognition?.lang).toBe('pt-BR')
-  expect(receivedTrack).toBe(track)
+  expect(receivedTrack).toBeUndefined()
+  expect(recognition?.continuous).toBe(false)
+  expect(recognition?.interimResults).toBe(true)
+  expect(recognition?.maxAlternatives).toBe(3)
   recognition?.onresult?.({
     resultIndex: 0,
     results: [{ isFinal: true, 0: { transcript: 'A luz guia minha jornada hoje' } }],
@@ -164,14 +167,14 @@ it('expõe contadores, método e alternativas dos eventos de voz', () => {
   })
   expect(latest.speechStarts).toBe(1)
   expect(latest.speechResults).toBe(1)
-  expect(latest.startMethod).toBe('track')
+  expect(latest.startMethod).toBe('plain')
   expect(phrases).toEqual([['Graça sobre graça', 'Graça e paz']])
   first.onerror?.({ error: 'no-speech' })
   expect(latest.speechError).toBe('no-speech')
   expect(latest.stoppedReason).toBeNull()
   first.onend?.()
   expect(latest.speechEnds).toBe(1)
-  vi.advanceTimersByTime(350)
+  vi.advanceTimersByTime(250)
   expect(instances).toHaveLength(2)
   stop()
   vi.useRealTimers()
@@ -219,7 +222,7 @@ it('não reinicia depois de not-allowed e expõe o motivo de parada', () => {
   vi.useRealTimers()
 })
 
-it('troca para o início padrão quando a faixa aceita start mas não entrega resultados', () => {
+it('reinicia depois de 250 ms e não cria instância após stop explícito', () => {
   const instances: any[] = []
   class FakeRecognition {
     onstart = null
@@ -247,9 +250,12 @@ it('troca para o início padrão quando a faixa aceita start mas não entrega re
       latest = value
     },
   )
-  vi.advanceTimersByTime(1200)
+  instances[0].onend?.()
+  vi.advanceTimersByTime(250)
   expect(instances).toHaveLength(2)
-  expect(latest.startMethod).toBe('plain')
   stop()
+  instances[1].onend?.()
+  vi.advanceTimersByTime(500)
+  expect(instances).toHaveLength(2)
   vi.useRealTimers()
 })
