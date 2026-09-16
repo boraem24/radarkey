@@ -50,7 +50,10 @@ export class AudioEngine {
         return
       }
       this.stream = stream
-      if (onStream) onStream(stream.getAudioTracks()[0])
+      const speechTrack = stream.getAudioTracks()[0]
+      // onStream runs only after getUserMedia returned a live track, avoiding
+      // a race where SpeechRecognition would receive undefined or ended audio.
+      if (onStream && speechTrack?.readyState === 'live') onStream(speechTrack)
       if (onSample && typeof MediaRecorder !== 'undefined') {
         const mimeType = [
           'audio/webm;codecs=opus',

@@ -8,6 +8,8 @@ export async function openMicrophone() {
     audio: {
       channelCount: { ideal: 1 },
       // Let the phone's voice path lift a distant singer before pitch analysis.
+      // Em alguns Android, o serviço nativo de voz pode disputar estas
+      // constraints; o painel de diagnóstico registra o erro para testar isso.
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,

@@ -299,7 +299,7 @@ export function useSession() {
           : undefined,
         !test
           ? (track) => {
-              if (track) {
+              if (track && track.readyState === 'live') {
                 const trackSnapshot: TrackSnapshot = {
                   readyState: track.readyState,
                   enabled: track.enabled,
@@ -321,6 +321,8 @@ export function useSession() {
                 }, (diagnostics) => {
                   if (generation.current === id) setSpeechDiagnostics({ ...diagnostics, trackSnapshot })
                 })
+              } else if (generation.current === id) {
+                setSpeechStatus('error')
               }
             }
           : undefined,
