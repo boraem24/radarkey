@@ -57,6 +57,8 @@ export function listenForWords(
   let fallbackTimer = 0
   let interimTimer = 0
   let lastPhrase = ''
+  const mobileBrowser =
+    typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   let diagnostics: SpeechDiagnostics = {
     speechStarts: 0,
     speechResults: 0,
@@ -144,7 +146,7 @@ export function listenForWords(
     }
 
     try {
-      if (forcePlain) {
+      if (forcePlain || mobileBrowser) {
         current.start()
         diagnostics.startMethod = 'plain'
         emit()
