@@ -218,3 +218,38 @@ it('não reinicia depois de not-allowed e expõe o motivo de parada', () => {
   first()
   vi.useRealTimers()
 })
+
+it('troca para o início padrão quando a faixa aceita start mas não entrega resultados', () => {
+  const instances: any[] = []
+  class FakeRecognition {
+    onstart = null
+    onresult = null
+    onend = null
+    onerror = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    maxAlternatives = 0
+    constructor() {
+      instances.push(this)
+    }
+    start() {}
+    abort() {}
+  }
+  vi.useFakeTimers()
+  vi.stubGlobal('window', { webkitSpeechRecognition: FakeRecognition })
+  let latest: any
+  const stop = listenForWords(
+    { readyState: 'live' } as MediaStreamTrack,
+    () => {},
+    undefined,
+    (value) => {
+      latest = value
+    },
+  )
+  vi.advanceTimersByTime(1200)
+  expect(instances).toHaveLength(2)
+  expect(latest.startMethod).toBe('plain')
+  stop()
+  vi.useRealTimers()
+})

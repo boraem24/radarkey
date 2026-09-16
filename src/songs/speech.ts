@@ -54,6 +54,7 @@ export function listenForWords(
   let stopped = false
   let permanentlyStopped = false
   let restartTimer = 0
+  let fallbackTimer = 0
   let interimTimer = 0
   let lastPhrase = ''
   let diagnostics: SpeechDiagnostics = {
@@ -74,7 +75,7 @@ export function listenForWords(
   }
   const normalize = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 200)
 
-  const begin = () => {
+  const begin = (forcePlain = false) => {
     if (stopped || permanentlyStopped || track.readyState === 'ended') return
     const current = new Constructor()
     recognition = current
@@ -85,6 +86,7 @@ export function listenForWords(
     diagnostics.startMethod = null
     emit()
     onState?.('starting')
+    const resultsAtStart = diagnostics.speechResults
 
     current.onstart = () => {
       diagnostics.speechStarts++
@@ -92,6 +94,7 @@ export function listenForWords(
       onState?.('listening')
     }
     current.onresult = (event) => {
+      clearTimeout(fallbackTimer)
       diagnostics.speechResults++
       markEvent('result')
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -99,7 +102,7 @@ export function listenForWords(
         if (!result.isFinal) {
           if (interimTimer) clearTimeout(interimTimer)
           const phrase = normalize(result[0]?.transcript || '')
-          interimTimer = window.setTimeout(() => {
+          interimTimer = setTimeout(() => {
             if (phrase && phrase !== lastPhrase) {
               lastPhrase = phrase
               onPhrase([phrase])
@@ -125,8 +128,8 @@ export function listenForWords(
       diagnostics.speechEnds++
       markEvent('end')
       if (!stopped && !permanentlyStopped) {
-        window.clearTimeout(restartTimer)
-        restartTimer = window.setTimeout(begin, 350)
+        clearTimeout(restartTimer)
+        restartTimer = setTimeout(begin, 350)
       }
     }
     current.onerror = (event) => {
@@ -141,9 +144,33 @@ export function listenForWords(
     }
 
     try {
-      current.start(track)
-      diagnostics.startMethod = 'track'
-      emit()
+      if (forcePlain) {
+        current.start()
+        diagnostics.startMethod = 'plain'
+        emit()
+      } else {
+        current.start(track)
+        diagnostics.startMethod = 'track'
+        emit()
+        // Some mobile Chromium builds accept start(track) but silently produce
+        // no results. Fall back to the standard start() before restarting.
+        fallbackTimer = setTimeout(() => {
+          if (
+            recognition === current &&
+            diagnostics.speechResults === resultsAtStart &&
+            !stopped &&
+            !permanentlyStopped
+          ) {
+            current.onend = null
+            try {
+              current.abort()
+            } catch {
+              /* Already stopped. */
+            }
+            begin(true)
+          }
+        }, 1200)
+      }
     } catch (exception) {
       diagnostics.startException = String(exception)
       emit()
@@ -161,6 +188,7 @@ export function listenForWords(
   return () => {
     stopped = true
     clearTimeout(restartTimer)
+    clearTimeout(fallbackTimer)
     if (interimTimer) clearTimeout(interimTimer)
     if (recognition) {
       recognition.onstart = null
