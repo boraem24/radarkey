@@ -39,6 +39,7 @@ export function useSession() {
     >('idle'),
     [songMatches, setSongMatches] = useState<SongCandidate[]>([]),
     [heardPhrase, setHeardPhrase] = useState(''),
+    [speechStatus, setSpeechStatus] = useState<'idle' | 'starting' | 'listening' | 'heard' | 'unsupported' | 'error'>('idle'),
     [metrics, setMetrics] = useState({ ttfh: null as number | null, ttfi: null as number | null, ttfc: null as number | null })
   const engine = useRef<AudioEngine | null>(null),
     generation = useRef(0),
@@ -81,6 +82,7 @@ export function useSession() {
     setSynthetic(test)
     setSongMatches([])
     setHeardPhrase('')
+    setSpeechStatus(!test && supportsSpeechRecognition() ? 'starting' : test ? 'idle' : 'unsupported')
     setMetrics({ ttfh: null, ttfi: null, ttfc: null })
     const startedAt = performance.now()
     let recognition = false
@@ -292,7 +294,10 @@ export function useSession() {
           : undefined,
         !test
           ? (track) => {
-              if (track) stopSpeech.current = listenForWords(track, onPhrase)
+              if (track)
+                stopSpeech.current = listenForWords(track, onPhrase, (status) => {
+                  if (generation.current === id) setSpeechStatus(status)
+                })
             }
           : undefined,
       )
@@ -321,6 +326,7 @@ export function useSession() {
     musicState,
     songMatches,
     heardPhrase,
+    speechStatus,
     metrics,
     active: [
       'requestingPermission',

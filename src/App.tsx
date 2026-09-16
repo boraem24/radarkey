@@ -153,11 +153,21 @@ export default function App() {
                         : 'Toque em Começar a ouvir'}
           </small>
         </div>
-        <p className="heard-phrase" data-testid="transcription-captured" style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 18 }}>
+        <p className="heard-phrase" data-testid="transcription-captured" style={{ fontSize: 18 }}>
           Transcrição capturada: {session.heardPhrase ? `“${session.heardPhrase}”` : 'nenhum trecho recebido'}
-          <button type="button" disabled={!session.heardPhrase} style={{ display: 'block', width: '100%', minHeight: 58, fontSize: 20, fontWeight: 800, background: '#6f9b88', color: '#07110d', borderRadius: 12, opacity: 1 }} onClick={() => void navigator.clipboard?.writeText(session.heardPhrase)}>
-            Copiar
-          </button>
+          {session.active && (
+            <small style={{ display: 'block', marginTop: 8, fontSize: 12, color: session.speechStatus === 'heard' ? '#b4f7d1' : '#9cada6' }}>
+              {session.speechStatus === 'heard'
+                ? 'Palavras recebidas pelo microfone.'
+                : session.speechStatus === 'listening' || session.speechStatus === 'starting'
+                  ? 'Escuta de palavras ativa. Cante uma frase.'
+                  : session.speechStatus === 'unsupported'
+                    ? 'Este navegador não oferece transcrição por voz.'
+                    : session.speechStatus === 'error'
+                      ? 'O navegador bloqueou a transcrição por voz.'
+                      : 'Aguardando o reconhecimento de voz.'}
+            </small>
+          )}
         </p>
         {session.songMatches.slice(0, 3).map((song) =>
           song.sourceUrl ? (

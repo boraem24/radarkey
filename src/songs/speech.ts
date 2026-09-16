@@ -6,9 +6,10 @@ type BrowserRecognition = {
   continuous: boolean
   interimResults: boolean
   maxAlternatives: number
+  onstart?: (() => void) | null
   onresult: ((event: SpeechEvent) => void) | null
   onend: (() => void) | null
-  onerror: (() => void) | null
+  onerror: ((event?: { error?: string }) => void) | null
   start: (track?: MediaStreamTrack) => void
   abort: () => void
 }
@@ -23,6 +24,7 @@ export function supportsSpeechRecognition() {
 export function listenForWords(
   track: MediaStreamTrack,
   onPhrase: (phrases: string[]) => void,
+  onState?: (state: 'starting' | 'listening' | 'heard' | 'error') => void,
 ): () => void {
   const browser = window as SpeechWindow
   const Constructor = browser.SpeechRecognition || browser.webkitSpeechRecognition
@@ -37,16 +39,20 @@ export function listenForWords(
     lastPhrase = ''
   const begin = () => {
     if (stopped || track.readyState === 'ended') return
+    onState?.('starting')
     try {
+      // Chromium can bind recognition directly to the live microphone track.
       recognition.start(track)
     } catch {
       try {
+        // Older browsers do not accept the optional track argument.
         recognition.start()
       } catch {
-        /* Browser refused transcription; melody keeps working. */
+        onState?.('error')
       }
     }
   }
+  recognition.onstart = () => onState?.('listening')
   recognition.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i]
@@ -55,6 +61,7 @@ export function listenForWords(
         const phrase = result[0]?.transcript?.replace(/\s+/g, ' ').trim().slice(0, 200) || ''
         interimTimer = window.setTimeout(() => {
           if (phrase && phrase !== lastPhrase) { lastPhrase = phrase; onPhrase([phrase]) }
+          if (phrase) onState?.('heard')
         }, 800)
         continue
       }
@@ -67,6 +74,7 @@ export function listenForWords(
       if (alternatives[0] && alternatives[0] !== lastPhrase) {
         lastPhrase = alternatives[0]
         onPhrase(alternatives)
+        onState?.('heard')
       }
     }
   }
@@ -74,12 +82,13 @@ export function listenForWords(
     if (!stopped) window.setTimeout(begin, 350)
   }
   recognition.onerror = () => {
-    /* ACRCloud and pitch detection remain active. */
+    onState?.('error')
   }
   begin()
   return () => {
     stopped = true
     if (interimTimer) clearTimeout(interimTimer)
+    recognition.onstart = null
     recognition.onresult = null
     recognition.onend = null
     recognition.onerror = null
