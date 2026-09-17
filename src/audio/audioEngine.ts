@@ -16,6 +16,12 @@ export interface AudioFrame {
 export class AudioEngine {
   private context: AudioContext | null = null
   private stream: MediaStream | null = null
+  private analyser: AnalyserNode | null = null
+  private source: MediaStreamAudioSourceNode | null = null
+  private streamEndHandler: (() => void) | null = null
+  private onStream: ((track: MediaStreamTrack) => void) | undefined
+  private onInterrupt: (() => void) | null = null
+  private microphoneReleased = false
   private worker: Worker | null = null
   private timer = 0
   private recoveryTimer = 0
@@ -34,6 +40,8 @@ export class AudioEngine {
     onSample?: (sample: Blob) => void,
     onStream?: (track: MediaStreamTrack) => void,
   ) {
+    this.onStream = onStream
+    this.onInterrupt = onInterrupt
     if (
       typeof AudioContext === 'undefined' ||
       typeof Worker === 'undefined' ||
@@ -93,6 +101,7 @@ export class AudioEngine {
     const context = this.context
     if (context.state !== 'running') await context.resume()
     const analyser = context.createAnalyser()
+    this.analyser = analyser
     analyser.fftSize = 4096
     analyser.smoothingTimeConstant = 0
     if (synthetic) {
@@ -103,12 +112,9 @@ export class AudioEngine {
       this.oscillator.connect(gain).connect(analyser)
       this.oscillator.start()
     } else if (this.stream) {
-      context.createMediaStreamSource(this.stream).connect(analyser)
-      this.stream.getTracks().forEach((t) =>
-        t.addEventListener('ended', () => {
-          if (!this.stopped) onInterrupt()
-        }),
-      )
+      this.source = context.createMediaStreamSource(this.stream)
+      this.source.connect(analyser)
+      this.attachStreamEndHandler(this.stream)
     }
     // Silent output keeps the graph active, without microphone feedback.
     const mute = context.createGain()
@@ -196,6 +202,41 @@ export class AudioEngine {
   async resumeAnalysis() {
     if (this.context && this.context.state === 'suspended') await this.context.resume()
   }
+  releaseMicrophone() {
+    if (!this.stream) {
+      this.microphoneReleased = true
+      return
+    }
+    if (this.streamEndHandler) {
+      this.stream.getTracks().forEach((track) => track.removeEventListener('ended', this.streamEndHandler!))
+      this.streamEndHandler = null
+    }
+    this.source?.disconnect()
+    this.source = null
+    this.stream.getTracks().forEach((track) => track.stop())
+    this.stream = null
+    this.microphoneReleased = true
+  }
+  async reacquireMicrophone() {
+    if (this.stopped) return
+    const stream = await openMicrophone()
+    if (this.stopped) {
+      stream.getTracks().forEach((track) => track.stop())
+      return
+    }
+    this.stream = stream
+    this.microphoneReleased = false
+    if (this.context && this.analyser) {
+      this.source = this.context.createMediaStreamSource(stream)
+      this.source.connect(this.analyser)
+      this.attachStreamEndHandler(stream)
+    }
+    const track = stream.getAudioTracks()[0]
+    if (track) this.onStream?.(track)
+  }
+  get isMicrophoneReleased() {
+    return this.microphoneReleased
+  }
   stopSamples() {
     this.samplesStopped = true
     window.clearTimeout(this.recorderTimer)
@@ -208,8 +249,20 @@ export class AudioEngine {
     window.clearTimeout(this.recorderTimer)
     if (this.recorder?.state === 'recording') this.recorder.stop()
     this.worker?.terminate()
+    if (this.streamEndHandler && this.stream) {
+      this.stream.getTracks().forEach((track) => track.removeEventListener('ended', this.streamEndHandler!))
+      this.streamEndHandler = null
+    }
+    this.source?.disconnect()
     this.oscillator?.stop()
     this.stream?.getTracks().forEach((t) => t.stop())
     if (this.context && this.context.state !== 'closed') void this.context.close()
+  }
+  private attachStreamEndHandler(stream: MediaStream) {
+    if (!this.onInterrupt) return
+    this.streamEndHandler = () => {
+      if (!this.stopped) this.onInterrupt?.()
+    }
+    stream.getTracks().forEach((track) => track.addEventListener('ended', this.streamEndHandler!))
   }
 }

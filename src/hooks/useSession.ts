@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AudioEngine } from '../audio/audioEngine'
 import type { AudioFrame } from '../audio/audioEngine'
-import { microphoneError } from '../audio/microphone'
+import { getRawMicrophoneStream, microphoneError } from '../audio/microphone'
 import { ChromaHistory } from '../music/chroma'
 import { KeyDetector } from '../music/keyDetector'
 import type { KeyResult } from '../music/keyDetector'
@@ -21,6 +21,7 @@ const EMPTY: KeyResult = {
   chroma: Array(12).fill(0),
   duration: 0,
 }
+export const MANUAL_FALLBACK_TIMEOUT_MS = 15000
 type TrackSnapshot = { readyState: string; enabled: boolean; muted: boolean }
 type SessionSpeechDiagnostics = SpeechDiagnostics & { trackSnapshot: TrackSnapshot }
 export function useSession() {
@@ -45,12 +46,18 @@ export function useSession() {
     [speechDiagnostics, setSpeechDiagnostics] = useState<SessionSpeechDiagnostics | null>(null),
     [speechStatus, setSpeechStatus] = useState<'idle' | 'starting' | 'listening' | 'heard' | 'unsupported' | 'error'>('idle'),
     [speechIsolation, setSpeechIsolation] = useState(false),
+    [speechExperiment, setSpeechExperiment] = useState<'tone-off' | 'raw' | null>(null),
+    [showManualPhraseInput, setShowManualPhraseInput] = useState(false),
     [metrics, setMetrics] = useState({ ttfh: null as number | null, ttfi: null as number | null, ttfc: null as number | null })
   const engine = useRef<AudioEngine | null>(null),
     generation = useRef(0),
     stopSpeech = useRef<(() => void) | null>(null),
     restartSpeech = useRef<(() => void) | null>(null),
-    activeRequest = useRef<AbortController | null>(null)
+    activeRequest = useRef<AbortController | null>(null),
+    manualLookup = useRef<((phrase: string) => void) | null>(null),
+    manualFallbackTimer = useRef<number | null>(null),
+    speechTrack = useRef<MediaStreamTrack | null>(null),
+    rawExperimentStream = useRef<MediaStream | null>(null)
   const stop = useCallback((reason = '') => {
     generation.current++
     stopSpeech.current?.()
@@ -64,6 +71,14 @@ export function useSession() {
     setMessage(reason)
     setFrame(null)
     setSpeechIsolation(false)
+    setSpeechExperiment(null)
+    setShowManualPhraseInput(false)
+    manualLookup.current = null
+    if (manualFallbackTimer.current) window.clearTimeout(manualFallbackTimer.current)
+    manualFallbackTimer.current = null
+    rawExperimentStream.current?.getTracks().forEach((track) => track.stop())
+    rawExperimentStream.current = null
+    speechTrack.current = null
   }, [])
   useEffect(() => {
     const visibility = () => {
@@ -91,6 +106,14 @@ export function useSession() {
     setSongMatches([])
     setHeardPhrase('')
     setSpeechDiagnostics(null)
+    setSpeechExperiment(null)
+    setShowManualPhraseInput(false)
+    manualLookup.current = null
+    if (manualFallbackTimer.current) window.clearTimeout(manualFallbackTimer.current)
+    manualFallbackTimer.current = null
+    rawExperimentStream.current?.getTracks().forEach((track) => track.stop())
+    rawExperimentStream.current = null
+    speechTrack.current = null
     setSpeechStatus(!test && supportsSpeechRecognition() ? 'starting' : test ? 'idle' : 'unsupported')
     setMetrics({ ttfh: null, ttfi: null, ttfc: null })
     const startedAt = performance.now()
@@ -203,6 +226,9 @@ export function useSession() {
       if (generation.current !== id || foundSong) return
       const phrase = phrases[0]?.trim()
       if (!phrase) return
+      setShowManualPhraseInput(false)
+      if (manualFallbackTimer.current) window.clearTimeout(manualFallbackTimer.current)
+      manualFallbackTimer.current = null
       latestPhrase = phrase
       phraseBuffer = [...phraseBuffer.filter((item) => item !== phrase), phrase].slice(-4)
       setHeardPhrase(phraseBuffer.join(' / '))
@@ -220,6 +246,13 @@ export function useSession() {
           void lookupPhrase(query)
         }
       }
+    }
+    manualLookup.current = (phrase: string) => {
+      const normalized = phrase.trim()
+      if (!normalized || generation.current !== id || foundSong) return
+      setHeardPhrase(normalized)
+      setMusicState('words')
+      void lookupPhrase(normalized)
     }
     const identifyExcerpt = async (blob: Blob, number: number) => {
       if (generation.current !== id || foundSong) return
@@ -254,6 +287,24 @@ export function useSession() {
         setMusicState(
           lyricCandidates.length ? 'lyricsCandidates' : latestPhrase ? 'words' : 'notFound',
         )
+    }
+    const startSpeechForTrack = (track: MediaStreamTrack | null) => {
+      const usableTrack = track && track.readyState === 'live' ? track : ({ readyState: 'live' } as MediaStreamTrack)
+      stopSpeech.current?.()
+      stopSpeech.current = listenForWords(usableTrack, onPhrase, (status) => {
+        if (generation.current === id) setSpeechStatus(status)
+      }, (diagnostics) => {
+        if (generation.current !== id) return
+        setSpeechDiagnostics((current) => ({
+          ...diagnostics,
+          trackSnapshot: current?.trackSnapshot || {
+            readyState: usableTrack.readyState,
+            enabled: usableTrack.enabled,
+            muted: usableTrack.muted,
+          },
+        }))
+        if (diagnostics.recognitionGaveUp) setShowManualPhraseInput(true)
+      })
     }
     try {
       await audio.start(
@@ -302,8 +353,9 @@ export function useSession() {
             }
           : undefined,
         !test
-          ? (track) => {
+           ? (track) => {
               if (track) {
+                speechTrack.current = track
                 const trackSnapshot: TrackSnapshot = {
                   readyState: track.readyState,
                   enabled: track.enabled,
@@ -317,6 +369,8 @@ export function useSession() {
                    soundStarts: 0,
                    speechDetectStarts: 0,
                    noMatches: 0,
+                   consecutiveNoMatch: 0,
+                   recognitionGaveUp: false,
                    activeLang: 'pt-BR',
                    networkProbe: 'unknown',
                    langCycleExhausted: false,
@@ -331,22 +385,20 @@ export function useSession() {
                   if (generation.current === id) setSpeechStatus('error')
                   return
                 }
-                restartSpeech.current = () => {
-                  stopSpeech.current?.()
-                  stopSpeech.current = listenForWords(track, onPhrase, (status) => {
-                    if (generation.current === id) setSpeechStatus(status)
-                  }, (diagnostics) => {
-                    if (generation.current === id) setSpeechDiagnostics({ ...diagnostics, trackSnapshot })
-                  })
-                }
-                restartSpeech.current()
+                restartSpeech.current = () => startSpeechForTrack(speechTrack.current)
+                if (!stopSpeech.current) restartSpeech.current()
               } else if (generation.current === id) {
                 setSpeechStatus('error')
               }
             }
           : undefined,
       )
-      if (generation.current === id) setState('listening')
+      if (generation.current === id) {
+        setState('listening')
+        manualFallbackTimer.current = window.setTimeout(() => {
+          if (generation.current === id && !foundSong) setShowManualPhraseInput(true)
+        }, MANUAL_FALLBACK_TIMEOUT_MS)
+      }
     } catch (error) {
       audio.stop()
       if (generation.current === id) {
@@ -361,15 +413,90 @@ export function useSession() {
     if (!engine.current) return
     stopSpeech.current?.()
     stopSpeech.current = null
-    await engine.current.suspendAnalysis()
+    engine.current.releaseMicrophone()
     setSpeechIsolation(true)
+    setSpeechExperiment('tone-off')
     restartSpeech.current?.()
+  }
+  const testRawSpeech = async () => {
+    if (!engine.current) return
+    stopSpeech.current?.()
+    stopSpeech.current = null
+    engine.current.releaseMicrophone()
+    try {
+      const stream = await getRawMicrophoneStream()
+      rawExperimentStream.current = stream
+      speechTrack.current = stream.getAudioTracks()[0] || null
+      setSpeechExperiment('raw')
+      setSpeechIsolation(true)
+      resetSpeechDiagnostics()
+      if (speechTrack.current)
+        setSpeechDiagnostics((current) =>
+          current
+            ? {
+                ...current,
+                trackSnapshot: {
+                  readyState: speechTrack.current!.readyState,
+                  enabled: speechTrack.current!.enabled,
+                  muted: speechTrack.current!.muted,
+                },
+              }
+            : current,
+        )
+      restartSpeech.current?.()
+    } catch (error) {
+      setMessage(microphoneError(error).message)
+    }
+  }
+  const endExperiment = async () => {
+    if (!engine.current) return
+    stopSpeech.current?.()
+    stopSpeech.current = null
+    rawExperimentStream.current?.getTracks().forEach((track) => track.stop())
+    rawExperimentStream.current = null
+    await engine.current.reacquireMicrophone()
+    setSpeechExperiment(null)
+    setSpeechIsolation(false)
+    if (!stopSpeech.current) restartSpeech.current?.()
   }
   const resumeTone = async () => {
     if (!engine.current) return
+    if (speechExperiment) {
+      await endExperiment()
+      return
+    }
+    stopSpeech.current?.()
+    stopSpeech.current = null
+    engine.current.releaseMicrophone()
+    await engine.current.reacquireMicrophone()
     await engine.current.resumeAnalysis()
     setSpeechIsolation(false)
-    restartSpeech.current?.()
+    setSpeechExperiment(null)
+  }
+  const resetSpeechDiagnostics = () => {
+    setSpeechDiagnostics((current) =>
+      current
+        ? {
+            ...current,
+            speechStarts: 0,
+            speechResults: 0,
+            speechEnds: 0,
+            audioStarts: 0,
+            soundStarts: 0,
+            speechDetectStarts: 0,
+            noMatches: 0,
+            consecutiveNoMatch: 0,
+            recognitionGaveUp: false,
+            speechError: null,
+            lastSpeechEvent: null,
+            startException: null,
+            stoppedReason: null,
+          }
+        : current,
+    )
+  }
+  const submitManualPhrase = (phrase: string) => {
+    manualLookup.current?.(phrase)
   }
   return {
     state,
@@ -388,8 +515,14 @@ export function useSession() {
     speechDiagnostics,
     speechStatus,
     speechIsolation,
+    speechExperiment,
     isolateSpeech,
+    testRawSpeech,
+    endExperiment,
     resumeTone,
+    resetSpeechDiagnostics,
+    showManualPhraseInput,
+    submitManualPhrase,
     metrics,
     active: [
       'requestingPermission',

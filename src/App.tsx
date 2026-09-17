@@ -28,7 +28,8 @@ export default function App() {
     [songsOpen, setSongsOpen] = useState(false),
     [songUrl, setSongUrl] = useState<string | undefined>(),
     [activeChart, setActiveChart] = useState<SongChart | null>(null),
-    [frequency, setFrequency] = useState(440)
+    [frequency, setFrequency] = useState(440),
+    [manualPhrase, setManualPhrase] = useState('')
   const { active, state, frame, key, progression } = session,
     top = key.selected,
     alternative = key.candidates.find((candidate) => candidate.root !== top?.root)
@@ -154,7 +155,24 @@ export default function App() {
                         : 'Toque em Começar a ouvir'}
           </small>
         </div>
-        <p className="heard-phrase" data-testid="transcription-captured" style={{ fontSize: 18 }}>
+        {session.showManualPhraseInput ? (
+          <form
+            className="manual-phrase"
+            onSubmit={(event) => {
+              event.preventDefault()
+              session.submitManualPhrase(manualPhrase)
+            }}
+          >
+            <label htmlFor="manual-phrase-input">Digite um trecho que você lembra</label>
+            <input
+              id="manual-phrase-input"
+              value={manualPhrase}
+              onChange={(event) => setManualPhrase(event.target.value)}
+              placeholder="Ex.: tua bondade me seguirá"
+            />
+            <button type="submit" disabled={!manualPhrase.trim()}>Buscar por este trecho</button>
+          </form>
+        ) : <p className="heard-phrase" data-testid="transcription-captured" style={{ fontSize: 18 }}>
           Transcrição capturada: {session.heardPhrase ? `“${session.heardPhrase}”` : 'nenhum trecho recebido'}
           {session.active && (
             <small style={{ display: 'block', marginTop: 8, fontSize: 12, color: session.speechStatus === 'heard' ? '#b4f7d1' : '#9cada6' }}>
@@ -169,7 +187,7 @@ export default function App() {
                       : 'Aguardando o reconhecimento de voz.'}
             </small>
           )}
-        </p>
+        </p>}
         {active && session.speechDiagnostics && !session.heardPhrase && (
           <p className="muted" data-testid="speech-capture-status">
             {session.speechDiagnostics.speechError === 'not-allowed' ||
@@ -400,8 +418,12 @@ export default function App() {
             speechDiagnostics={session.speechDiagnostics}
             speechSupported={supportsSpeechRecognition()}
             speechIsolation={session.speechIsolation}
+            speechExperiment={session.speechExperiment}
             onIsolateSpeech={session.isolateSpeech}
+            onRawSpeech={session.testRawSpeech}
+            onEndExperiment={session.endExperiment}
             onResumeTone={session.resumeTone}
+            onResetSpeechDiagnostics={session.resetSpeechDiagnostics}
             active={active}
           />
           <h3>Perfil de notas · últimos 15 s</h3>

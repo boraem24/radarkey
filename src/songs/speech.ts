@@ -15,6 +15,8 @@ export interface SpeechDiagnostics {
   soundStarts: number
   speechDetectStarts: number
   noMatches: number
+  consecutiveNoMatch: number
+  recognitionGaveUp: boolean
   activeLang: string
   networkProbe: 'online' | 'offline' | 'unknown'
   langCycleExhausted: boolean
@@ -86,17 +88,10 @@ export async function probeNetwork(): Promise<'online' | 'offline' | 'unknown'> 
 export function diagnoseSpeechFailure(diagnostics: SpeechDiagnostics): string {
   if (diagnostics.audioStarts === 0 && diagnostics.speechStarts >= 3)
     return 'O navegador nunca confirmou receber áudio para reconhecimento. Pode ser bloqueio de permissão em segundo plano ou conflito com outro app usando o microfone.'
-  if (diagnostics.audioStarts > 0 && diagnostics.soundStarts === 0)
-    return 'O navegador recebe áudio, mas não detecta nenhum som acima do limiar interno dele. Fale mais perto do aparelho ou verifique o volume de captação.'
-  if (diagnostics.soundStarts > 0 && diagnostics.speechDetectStarts === 0)
-    return 'Som é detectado, mas o navegador não reconhece como fala humana. Pode ser ruído de fundo dominante ou o classificador de voz do aparelho.'
-  if (
-    diagnostics.speechDetectStarts > 0 &&
-    diagnostics.speechResults === 0 &&
-    diagnostics.noMatches === 0 &&
-    diagnostics.speechError === null
-  )
-    return `O navegador reconheceu sua voz como fala, mas o serviço de transcrição nunca respondeu. Isso indica bloqueio de rede até o serviço de voz do Google, pacote de idioma pt-BR ausente no aparelho ou o serviço de voz do Android desligado nas configurações do sistema. Sonda de rede: ${diagnostics.networkProbe}.`
+  if (diagnostics.recognitionGaveUp || diagnostics.consecutiveNoMatch >= 8)
+    return 'O serviço de reconhecimento de voz deste aparelho está recebendo o áudio, mas não consegue transcrever nenhuma palavra, mesmo testando outros idiomas. Isso costuma acontecer por causa do cancelamento de ruído do microfone ou de configurações de voz do sistema Android. Use o campo de texto manual abaixo ou teste os experimentos no Diagnóstico.'
+  if (diagnostics.speechError)
+    return `Erro do reconhecimento de voz: ${diagnostics.speechError}.`
   if (diagnostics.noMatches > 0)
     return 'O serviço respondeu, mas não conseguiu transcrever nenhuma palavra. Tente falar mais devagar e mais perto do microfone.'
   return ''
@@ -118,9 +113,8 @@ export function listenForWords(
   let restartTimer = 0
   let interimTimer = 0
   let lastPhrase = ''
-  let languageIndex = 0
-  let consecutiveSilentSessions = 0
-  const testedLanguages = new Set<string>()
+  let consecutiveNoMatch = 0
+  let recognitionGaveUp = false
   let diagnostics: SpeechDiagnostics = {
     speechStarts: 0,
     speechResults: 0,
@@ -129,7 +123,9 @@ export function listenForWords(
     soundStarts: 0,
     speechDetectStarts: 0,
     noMatches: 0,
-    activeLang: LANG_ATTEMPTS[0] || '',
+    consecutiveNoMatch: 0,
+    recognitionGaveUp: false,
+    activeLang: 'pt-BR',
     networkProbe: 'unknown',
     langCycleExhausted: false,
     speechError: null,
@@ -150,8 +146,7 @@ export function listenForWords(
     if (stopped || permanentlyStopped || track.readyState === 'ended') return
     const current = new Constructor()
     recognition = current
-    current.lang = diagnostics.activeLang
-    testedLanguages.add(current.lang)
+    current.lang = 'pt-BR'
     current.continuous = false
     current.interimResults = true
     current.maxAlternatives = 3
@@ -164,12 +159,7 @@ export function listenForWords(
       markEvent('start')
       onState?.('listening')
     }
-    let sessionAudioStarted = false
-    let sessionSpeechDetected = false
-    let sessionResult = false
-    let sessionError = false
     current.onaudiostart = () => {
-      sessionAudioStarted = true
       diagnostics.audioStarts++
       markEvent('audiostart')
     }
@@ -180,18 +170,26 @@ export function listenForWords(
     }
     current.onsoundend = () => markEvent('soundend')
     current.onspeechstart = () => {
-      sessionSpeechDetected = true
       diagnostics.speechDetectStarts++
       markEvent('speechstart')
     }
     current.onspeechend = () => markEvent('speechend')
     current.onnomatch = () => {
       diagnostics.noMatches++
+      consecutiveNoMatch++
+      diagnostics.consecutiveNoMatch = consecutiveNoMatch
+      if (consecutiveNoMatch >= 8) {
+        recognitionGaveUp = true
+        diagnostics.recognitionGaveUp = true
+        diagnostics.langCycleExhausted = true
+        diagnostics.activeLang = 'pt-BR'
+        diagnostics.stoppedReason = 'recognition-gave-up'
+      }
       markEvent('nomatch')
     }
     current.onresult = (event) => {
-      sessionResult = true
-      consecutiveSilentSessions = 0
+      consecutiveNoMatch = 0
+      diagnostics.consecutiveNoMatch = 0
       diagnostics.speechResults++
       markEvent('result')
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -224,30 +222,12 @@ export function listenForWords(
     current.onend = () => {
       diagnostics.speechEnds++
       markEvent('end')
-      if (sessionAudioStarted && !sessionSpeechDetected && !sessionResult && !sessionError) {
-        consecutiveSilentSessions++
-        if (consecutiveSilentSessions >= 3) {
-          consecutiveSilentSessions = 0
-          if (!diagnostics.langCycleExhausted) {
-            if (testedLanguages.size >= LANG_ATTEMPTS.length) {
-              diagnostics.langCycleExhausted = true
-            } else {
-              languageIndex = (languageIndex + 1) % LANG_ATTEMPTS.length
-              diagnostics.activeLang = LANG_ATTEMPTS[languageIndex] || ''
-            }
-            emit()
-          }
-        }
-      } else {
-        consecutiveSilentSessions = 0
-      }
-      if (!stopped && !permanentlyStopped) {
+      if (!stopped && !permanentlyStopped && !recognitionGaveUp) {
         clearTimeout(restartTimer)
         restartTimer = setTimeout(begin, 250)
       }
     }
     current.onerror = (event) => {
-      sessionError = true
       const error = event?.error || 'unknown'
       diagnostics.speechError = error
       markEvent('error')

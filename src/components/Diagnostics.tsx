@@ -11,16 +11,24 @@ export function Diagnostics({
   speechDiagnostics,
   speechSupported,
   speechIsolation,
+  speechExperiment,
   onIsolateSpeech,
+  onRawSpeech,
+  onEndExperiment,
   onResumeTone,
+  onResetSpeechDiagnostics,
   active,
 }: {
   frame: AudioFrame | null
   speechDiagnostics: SessionSpeechDiagnostics | null
   speechSupported: boolean
   speechIsolation: boolean
+  speechExperiment: 'tone-off' | 'raw' | null
   onIsolateSpeech: () => void
+  onRawSpeech: () => void
+  onEndExperiment: () => void
   onResumeTone: () => void
+  onResetSpeechDiagnostics: () => void
   active: boolean
 }) {
   const [, setTick] = useState(0)
@@ -66,6 +74,7 @@ export function Diagnostics({
     'Idioma ativo': speechDiagnostics?.activeLang || '—',
     'Sonda de rede': speechDiagnostics?.networkProbe ?? 'unknown',
     'Ciclo de idiomas': speechDiagnostics?.langCycleExhausted ? 'esgotado' : 'em andamento',
+    'Desistência': speechDiagnostics?.recognitionGaveUp ? 'sim' : 'não',
     'Último erro': speechDiagnostics?.speechError ?? '—',
     'Último evento': lastEvent ? `${lastEvent.type} · há ${age}s` : '—',
     'Faixa readyState': speechDiagnostics?.trackSnapshot.readyState ?? '—',
@@ -96,17 +105,24 @@ export function Diagnostics({
       </dl>
       {active && (
         <div className="test-controls">
-          {speechIsolation ? (
+          <button type="button" onClick={onResetSpeechDiagnostics}>Zerar contadores</button>
+          {speechExperiment === 'raw' ? (
             <>
-              <p className="muted">Análise de tom pausada — cante ou fale agora para testar reconhecimento isolado.</p>
-              <button type="button" onClick={() => void onResumeTone()}>
-                Retomar análise de tom
-              </button>
+              <p className="muted">Testando sem cancelamento de eco/ruído — fale normalmente por 20 segundos e veja se Sem correspondência muda.</p>
+              <button type="button" onClick={() => void onEndExperiment()}>Encerrar experimento</button>
+            </>
+          ) : speechIsolation ? (
+            <>
+              <p className="muted">Microfone de análise de tom desligado — fale agora para testar reconhecimento isolado.</p>
+              <button type="button" onClick={() => void onResumeTone()}>Retomar análise de tom</button>
             </>
           ) : (
-            <button type="button" onClick={() => void onIsolateSpeech()}>
-              Testar sem análise de tom
-            </button>
+            <>
+              <button type="button" onClick={() => void onIsolateSpeech()}>
+                Testar reconhecimento com microfone de tom desligado
+              </button>
+              <button type="button" onClick={() => void onRawSpeech()}>Testar com áudio não processado</button>
+            </>
           )}
         </div>
       )}

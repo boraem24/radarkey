@@ -6,6 +6,7 @@ import {
   probeNetwork,
 } from '../src/songs/speech'
 import type { SpeechDiagnostics } from '../src/songs/speech'
+import { getRawMicrophoneStream } from '../src/audio/microphone'
 import { rankCharts, lyricSearchLink } from '../src/songs/resolve'
 import { acousticDecision } from '../src/songs/consensus'
 import type { SongCandidate } from '../src/songs/types'
@@ -186,7 +187,7 @@ it('expõe contadores, método e alternativas dos eventos de voz', () => {
   vi.useRealTimers()
 })
 
-it('alterna o idioma depois de três sessões silenciosas com áudio', () => {
+it('mantém pt-BR e não alterna idioma em sessões silenciosas', () => {
   const instances: any[] = []
   class FakeRecognition {
     onstart = null
@@ -216,7 +217,7 @@ it('alterna o idioma depois de três sessões silenciosas com áudio', () => {
     instances[i].onend?.()
     vi.advanceTimersByTime(250)
   }
-  expect(latest.activeLang).toBe(LANG_ATTEMPTS[1])
+  expect(latest.activeLang).toBe(LANG_ATTEMPTS[0])
   expect(instances).toHaveLength(4)
   stop()
   vi.useRealTimers()
@@ -295,6 +296,8 @@ it('calcula a hipótese de falha pela prioridade dos eventos', () => {
     soundStarts: 0,
     speechDetectStarts: 0,
     noMatches: 0,
+    consecutiveNoMatch: 0,
+    recognitionGaveUp: false,
     activeLang: 'pt-BR',
     networkProbe: 'unknown',
     langCycleExhausted: false,
@@ -305,11 +308,80 @@ it('calcula a hipótese de falha pela prioridade dos eventos', () => {
     stoppedReason: null,
   }
   expect(diagnoseSpeechFailure(base)).toContain('nunca confirmou receber áudio')
-  expect(diagnoseSpeechFailure({ ...base, audioStarts: 1 })).toContain('não detecta nenhum som')
-  expect(diagnoseSpeechFailure({ ...base, audioStarts: 1, soundStarts: 1 })).toContain('não reconhece como fala humana')
-  expect(
-    diagnoseSpeechFailure({ ...base, audioStarts: 1, soundStarts: 1, speechDetectStarts: 1, networkProbe: 'online' }),
-  ).toContain('serviço de transcrição nunca respondeu')
+  const noSound = diagnoseSpeechFailure({ ...base, audioStarts: 1 })
+  expect(noSound).toBe('')
+  expect(diagnoseSpeechFailure({ ...base, audioStarts: 1, noMatches: 1 })).toContain('serviço respondeu')
+  expect(diagnoseSpeechFailure({ ...base, audioStarts: 1, soundStarts: 1, speechResults: 1 })).toBe('')
+})
+it('desiste após oito eventos sem correspondência e não reinicia', () => {
+  const instances: any[] = []
+  class FakeRecognition {
+    onstart = null
+    onnomatch = null
+    onend = null
+    onresult = null
+    onerror = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    maxAlternatives = 0
+    constructor() { instances.push(this) }
+    start() {}
+    abort() {}
+  }
+  vi.useFakeTimers()
+  vi.stubGlobal('window', { webkitSpeechRecognition: FakeRecognition, setTimeout, clearTimeout })
+  let latest: any
+  const stop = listenForWords({ readyState: 'live' } as MediaStreamTrack, () => {}, undefined, (value) => { latest = value })
+  for (let i = 0; i < 8; i++) instances[0].onnomatch?.()
+  expect(latest.consecutiveNoMatch).toBe(8)
+  expect(latest.recognitionGaveUp).toBe(true)
+  instances[0].onend?.()
+  vi.advanceTimersByTime(500)
+  expect(instances).toHaveLength(1)
+  stop()
+  vi.useRealTimers()
+})
+
+it('zera sem correspondência ao receber resultado', () => {
+  const instances: any[] = []
+  class FakeRecognition {
+    onstart = null
+    onnomatch = null
+    onresult = null
+    onend = null
+    onerror = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    maxAlternatives = 0
+    constructor() { instances.push(this) }
+    start() {}
+    abort() {}
+  }
+  vi.stubGlobal('window', { webkitSpeechRecognition: FakeRecognition })
+  let latest: any
+  const stop = listenForWords({ readyState: 'live' } as MediaStreamTrack, () => {}, undefined, (value) => { latest = value })
+  for (let i = 0; i < 3; i++) instances[0].onnomatch?.()
+  instances[0].onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'uma frase' } }] })
+  expect(latest.consecutiveNoMatch).toBe(0)
+  expect(latest.recognitionGaveUp).toBe(false)
+  stop()
+})
+
+it('solicita microfone sem cancelamento no experimento bruto', async () => {
+  const getUserMedia = vi.fn().mockResolvedValue({ getAudioTracks: () => [] })
+  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
+  await getRawMicrophoneStream()
+  expect(getUserMedia).toHaveBeenCalledWith({
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+    },
+    video: false,
+  })
 })
 
 it('não reinicia depois de not-allowed e expõe o motivo de parada', () => {

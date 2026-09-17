@@ -17,6 +17,18 @@ export async function openMicrophone() {
     video: false,
   })
 }
+/** Captura sem processamento, usada somente pelos experimentos de diagnóstico. */
+export async function getRawMicrophoneStream(): Promise<MediaStream> {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+    },
+    video: false,
+  })
+}
 export function microphoneError(error: unknown) {
   const name = error instanceof Error ? error.name : ''
   const messages: Record<string, string> = {
