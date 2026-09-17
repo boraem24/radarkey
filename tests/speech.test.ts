@@ -1,5 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { listenForWords } from '../src/songs/speech'
+import {
+  diagnoseSpeechFailure,
+  LANG_ATTEMPTS,
+  listenForWords,
+  probeNetwork,
+} from '../src/songs/speech'
+import type { SpeechDiagnostics } from '../src/songs/speech'
 import { rankCharts, lyricSearchLink } from '../src/songs/resolve'
 import { acousticDecision } from '../src/songs/consensus'
 import type { SongCandidate } from '../src/songs/types'
@@ -178,6 +184,132 @@ it('expõe contadores, método e alternativas dos eventos de voz', () => {
   expect(instances).toHaveLength(2)
   stop()
   vi.useRealTimers()
+})
+
+it('alterna o idioma depois de três sessões silenciosas com áudio', () => {
+  const instances: any[] = []
+  class FakeRecognition {
+    onstart = null
+    onaudiostart = null
+    onend = null
+    onresult = null
+    onerror = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    maxAlternatives = 0
+    constructor() { instances.push(this) }
+    start() {}
+    abort() {}
+  }
+  vi.useFakeTimers()
+  vi.stubGlobal('window', { webkitSpeechRecognition: FakeRecognition, setTimeout, clearTimeout })
+  let latest: any
+  const stop = listenForWords(
+    { readyState: 'live' } as MediaStreamTrack,
+    () => {},
+    undefined,
+    (value) => { latest = value },
+  )
+  for (let i = 0; i < 3; i++) {
+    instances[i].onaudiostart?.()
+    instances[i].onend?.()
+    vi.advanceTimersByTime(250)
+  }
+  expect(latest.activeLang).toBe(LANG_ATTEMPTS[1])
+  expect(instances).toHaveLength(4)
+  stop()
+  vi.useRealTimers()
+})
+
+it('zera a sequência silenciosa quando uma sessão reconhece fala', () => {
+  const instances: any[] = []
+  class FakeRecognition {
+    onstart = null
+    onaudiostart = null
+    onsoundstart = null
+    onspeechstart = null
+    onend = null
+    onresult = null
+    onerror = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    maxAlternatives = 0
+    constructor() { instances.push(this) }
+    start() {}
+    abort() {}
+  }
+  vi.useFakeTimers()
+  vi.stubGlobal('window', { webkitSpeechRecognition: FakeRecognition, setTimeout, clearTimeout })
+  let latest: any
+  const stop = listenForWords(
+    { readyState: 'live' } as MediaStreamTrack,
+    () => {},
+    undefined,
+    (value) => { latest = value },
+  )
+  for (let i = 0; i < 2; i++) {
+    instances[i].onaudiostart?.()
+    instances[i].onend?.()
+    vi.advanceTimersByTime(250)
+  }
+  instances[2].onaudiostart?.()
+  instances[2].onsoundstart?.()
+  instances[2].onspeechstart?.()
+  instances[2].onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'graça' } }] })
+  instances[2].onend?.()
+  vi.advanceTimersByTime(250)
+  for (let i = 3; i < 5; i++) {
+    instances[i].onaudiostart?.()
+    instances[i].onend?.()
+    vi.advanceTimersByTime(250)
+  }
+  expect(latest.activeLang).toBe(LANG_ATTEMPTS[0])
+  stop()
+  vi.useRealTimers()
+})
+
+it('sonda a rede sem afirmar acesso ao serviço de voz', async () => {
+  const originalOnline = navigator.onLine
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
+  const fetchMock = vi.fn().mockResolvedValue({})
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(probeNetwork()).resolves.toBe('online')
+  expect(fetchMock).toHaveBeenCalledOnce()
+  fetchMock.mockRejectedValueOnce(new Error('offline'))
+  await expect(probeNetwork()).resolves.toBe('unknown')
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: false })
+  fetchMock.mockClear()
+  await expect(probeNetwork()).resolves.toBe('offline')
+  expect(fetchMock).not.toHaveBeenCalled()
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: originalOnline })
+})
+
+it('calcula a hipótese de falha pela prioridade dos eventos', () => {
+  const base: SpeechDiagnostics = {
+    speechStarts: 3,
+    speechResults: 0,
+    speechEnds: 3,
+    audioStarts: 0,
+    soundStarts: 0,
+    speechDetectStarts: 0,
+    noMatches: 0,
+    activeLang: 'pt-BR',
+    networkProbe: 'unknown',
+    langCycleExhausted: false,
+    speechError: null,
+    lastSpeechEvent: null,
+    startMethod: 'plain',
+    startException: null,
+    stoppedReason: null,
+  }
+  expect(diagnoseSpeechFailure(base)).toContain('nunca confirmou receber áudio')
+  expect(diagnoseSpeechFailure({ ...base, audioStarts: 1 })).toContain('não detecta nenhum som')
+  expect(diagnoseSpeechFailure({ ...base, audioStarts: 1, soundStarts: 1 })).toContain('não reconhece como fala humana')
+  expect(
+    diagnoseSpeechFailure({ ...base, audioStarts: 1, soundStarts: 1, speechDetectStarts: 1, networkProbe: 'online' }),
+  ).toContain('serviço de transcrição nunca respondeu')
 })
 
 it('não reinicia depois de not-allowed e expõe o motivo de parada', () => {

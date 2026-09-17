@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AudioFrame } from '../audio/audioEngine'
+import { diagnoseSpeechFailure } from '../songs/speech'
 import type { SpeechDiagnostics } from '../songs/speech'
 
 type TrackSnapshot = { readyState: string; enabled: boolean; muted: boolean }
@@ -59,6 +60,12 @@ export function Diagnostics({
     'Contadores': speechDiagnostics
       ? `Início: ${speechDiagnostics.speechStarts} · Resultado: ${speechDiagnostics.speechResults} · Fim: ${speechDiagnostics.speechEnds}`
       : 'Início: 0 · Resultado: 0 · Fim: 0',
+    'Eventos intermediários': speechDiagnostics
+      ? `Áudio: ${speechDiagnostics.audioStarts} · Som: ${speechDiagnostics.soundStarts} · Fala detectada: ${speechDiagnostics.speechDetectStarts} · Sem correspondência: ${speechDiagnostics.noMatches}`
+      : 'Áudio: 0 · Som: 0 · Fala detectada: 0 · Sem correspondência: 0',
+    'Idioma ativo': speechDiagnostics?.activeLang || '—',
+    'Sonda de rede': speechDiagnostics?.networkProbe ?? 'unknown',
+    'Ciclo de idiomas': speechDiagnostics?.langCycleExhausted ? 'esgotado' : 'em andamento',
     'Último erro': speechDiagnostics?.speechError ?? '—',
     'Último evento': lastEvent ? `${lastEvent.type} · há ${age}s` : '—',
     'Faixa readyState': speechDiagnostics?.trackSnapshot.readyState ?? '—',
@@ -67,6 +74,7 @@ export function Diagnostics({
     'Motivo de parada': speechDiagnostics?.stoppedReason ?? '—',
     'Modo de exibição': displayMode,
   }
+  const hypothesis = speechDiagnostics ? diagnoseSpeechFailure(speechDiagnostics) : ''
   return (
     <>
       <dl className="diagnostics">
@@ -102,6 +110,12 @@ export function Diagnostics({
           )}
         </div>
       )}
+      {hypothesis && <p className="muted" data-testid="speech-hypothesis">{hypothesis}</p>}
+      <p className="muted">
+        Se o problema persistir: em Configurações do Android, abra o app Google → Configurações → Voz,
+        e confirme que o reconhecimento de voz está habilitado. Teste também sem VPN e trocando de Wi-Fi
+        para dados móveis.
+      </p>
     </>
   )
 }

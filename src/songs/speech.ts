@@ -83,6 +83,25 @@ export async function probeNetwork(): Promise<'online' | 'offline' | 'unknown'> 
   }
 }
 
+export function diagnoseSpeechFailure(diagnostics: SpeechDiagnostics): string {
+  if (diagnostics.audioStarts === 0 && diagnostics.speechStarts >= 3)
+    return 'O navegador nunca confirmou receber áudio para reconhecimento. Pode ser bloqueio de permissão em segundo plano ou conflito com outro app usando o microfone.'
+  if (diagnostics.audioStarts > 0 && diagnostics.soundStarts === 0)
+    return 'O navegador recebe áudio, mas não detecta nenhum som acima do limiar interno dele. Fale mais perto do aparelho ou verifique o volume de captação.'
+  if (diagnostics.soundStarts > 0 && diagnostics.speechDetectStarts === 0)
+    return 'Som é detectado, mas o navegador não reconhece como fala humana. Pode ser ruído de fundo dominante ou o classificador de voz do aparelho.'
+  if (
+    diagnostics.speechDetectStarts > 0 &&
+    diagnostics.speechResults === 0 &&
+    diagnostics.noMatches === 0 &&
+    diagnostics.speechError === null
+  )
+    return `O navegador reconheceu sua voz como fala, mas o serviço de transcrição nunca respondeu. Isso indica bloqueio de rede até o serviço de voz do Google, pacote de idioma pt-BR ausente no aparelho ou o serviço de voz do Android desligado nas configurações do sistema. Sonda de rede: ${diagnostics.networkProbe}.`
+  if (diagnostics.noMatches > 0)
+    return 'O serviço respondeu, mas não conseguiu transcrever nenhuma palavra. Tente falar mais devagar e mais perto do microfone.'
+  return ''
+}
+
 export function listenForWords(
   track: MediaStreamTrack,
   onPhrase: (phrases: string[]) => void,
